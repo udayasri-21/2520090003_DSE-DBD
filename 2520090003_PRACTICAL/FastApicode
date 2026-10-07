@@ -1,0 +1,70 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
+from sqlalchemy.exc import IntegrityError
+
+app = FastAPI()
+
+
+# Replace the password below with your MySQL root password.
+DATABASE_URL = URL.create(
+    drivername="mysql+pymysql",
+    username="root",
+    password="YOUR_MYSQL_PASSWORD",
+    host="localhost",
+    port=3306,
+    database="university",
+    query={"charset": "utf8mb4"}
+)
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+class Student(BaseModel):
+    id: int
+    name: str
+    department: str
+
+
+@app.get("/")
+def home():
+    return {"message": "FastAPI MySQL application is running"}
+
+
+@app.get("/students")
+def get_students():
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("SELECT id, name, department FROM students")
+        )
+
+        students = result.mappings().all()
+        return [dict(student) for student in students]
+
+
+@app.post("/students", status_code=201)
+def create_student(student: Student):
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                    INSERT INTO students (id, name, department)
+                    VALUES (:id, :name, :department)
+                """),
+                {
+                    "id": student.id,
+                    "name": student.name,
+                    "department": student.department
+                }
+            )
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="A student with this ID already exists"
+        )
+
+    return {
+        "message": "Student created successfully",
+        "student": student
+    }
